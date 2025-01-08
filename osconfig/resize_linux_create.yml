@@ -23,122 +23,138 @@
     setup:
     become: yes
 
-- name: "Resize Root Partition - Check if Filesystem to resize is sent in input"
-  debug:
-    msg: "The filesystem mounted on a system partition whose LV will be resized was not provided, root filesystem '/' will be used instead"
-  when: resized_fs is not defined or resized_fs == ""
+  - name: "Resize Root Partition - Check if Filesystem to resize is sent in input"
+    debug:
+      msg: "The filesystem mounted on a system partition whose LV will be resized was not provided, root filesystem '/' will be used instead"
+    when: resized_fs is not defined or resized_fs == ""
 
-- name: "Resize Root Partition - Set the filesystem mount point variable whose LV it is mounted on will be resized to default"
-  set_fact:
-    fs: "/"
-  when: resized_fs is not defined or resized_fs == ""
+  - name: "Resize Root Partition - Set the filesystem mount point variable whose LV it is mounted on will be resized to default"
+    set_fact:
+      fs: "/"
+    when: resized_fs is not defined or resized_fs == ""
 
-- name: "Resize Root Partition - Set the filesystem mount point variable whose LV it is mounted on will be resized as provided in input"
-  set_fact:
-    fs: '{{ resized_fs }}'
-  when: resized_fs is defined and resized_fs != ""
+  - name: "Resize Root Partition - Set the filesystem mount point variable whose LV it is mounted on will be resized as provided in input"
+    set_fact:
+      fs: '{{ resized_fs }}'
+    when: resized_fs is defined and resized_fs != ""
 
-- name: "Resize Root Partition - Detect the root system volume group"
-  become: yes
-  shell: |
-    df -m {{ fs }}|grep /dev/mapper|awk '{print $1}'|cut -d "/" -f4|cut -d "-" -f1
-  register: fs_vg
-#  changed_when: false
-  tags: fs_param
+  - name: "Resize Root Partition - Detect the root system volume group"
+    become: yes
+    shell: |
+      df -m {{ fs }}|grep /dev/mapper|awk '{print $1}'|cut -d "/" -f4|cut -d "-" -f1
+    register: fs_vg
+    tags: fs_param
 
-- name: "Resize Root Partition - Detect the root system logical volume"
-  become: yes
-  shell: |
-    df -m {{ fs }}|grep /dev/mapper|awk '{print $1}'|cut -d "/" -f4|cut -d "-" -f2
-  register: fs_lv
-#  changed_when: false
-  tags: fs_param
+  - name: "Resize Root Partition - Detect the root system logical volume"
+    become: yes
+    shell: |
+      df -m {{ fs }}|grep /dev/mapper|awk '{print $1}'|cut -d "/" -f4|cut -d "-" -f2
+    register: fs_lv
+    tags: fs_param
 
-- name: "Resize Root Partition - Detect the root system physical volume (partition device)"
-  become: yes
-  shell: |
-    pvs|grep '{{ fs_vg.stdout }}' | awk '{print $1}'
-  register: part_dev
-#  changed_when: false
-  tags: fs_param
+  - name: "Resize Root Partition - Detect the root system physical volume (partition device)"
+    become: yes
+    shell: |
+      pvs|grep '{{ fs_vg.stdout }}' | awk '{print $1}'
+    register: part_dev
+    tags: fs_param
 
-- name: "Resize Root Partition - Detect the system disk device"
-  become: yes
-  shell: |
-    pvs |grep '{{ fs_vg.stdout }}' | awk '{print $1}'|tr -d [:digit:]
-  register: disk_dev
-#  changed_when: false
-  tags: fs_param
+  - name: "Resize Root Partition - Detect the system disk device"
+    become: yes
+    shell: |
+      pvs |grep '{{ fs_vg.stdout }}' | awk '{print $1}'|tr -d [:digit:]
+    register: disk_dev
+    tags: fs_param
 
-- name: "Resize Root Partition - Detect the system pv partition number in the partition table of system disk device identified"
-  become: yes
-  shell: |
-    pvs | grep '{{ fs_vg.stdout }}' | awk '{print $1}' | grep -Eo '[0-9]+$'
-  register: part_num
-  tags: fs_param
+  - name: "Resize Root Partition - Detect the system pv partition number in the partition table of system disk device identified"
+    become: yes
+    shell: |
+      pvs | grep '{{ fs_vg.stdout }}' | awk '{print $1}' | grep -Eo '[0-9]+$'
+    register: part_num
+    tags: fs_param
 
-- name: "Resize Root Partition - Delete old root partition and recreate up to max free size in Partition Table for SLES 15.4"
-  become: yes
-  shell: |
-    nstart=$(fdisk -l {{ disk_dev.stdout }} -o Device,Start,End | grep -o '^{{ part_dev.stdout }}.*' | awk '{print $2}')
-    #echo $nstart > /tmp/nstart.txt
-    sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk '{{ disk_dev.stdout }}'
-     d # delete mode
-     {{ part_num.stdout }} # partition number to delete
-     n # create new partition
-     {{ part_num.stdout }} # partition number to create
-     $nstart # first sector
-       # Last sector: default (empty) end of disk
-     N # Remove LVM2_member signature? Y/N
-     t # Change Type of Partition
-     {{ part_num.stdout }} # Partition Number to change type of
-     30 # Partition type to set: 30 Linux LVM on SLES 15.4
-     w # write the partition table to disk
-    EOF
-  when: ansible_distribution == "SLES" and ansible_distribution_version == "15.4"
-  register: partition_resize
-  #changed_when: false
-  #tags: fs_param
+  - name: "Resize Root Partition - Delete old root partition and recreate up to max free size in Partition Table for SLES 15.4"
+    become: yes
+    shell: |
+      nstart=$(fdisk -l {{ disk_dev.stdout }} -o Device,Start,End | grep -o '^{{ part_dev.stdout }}.*' | awk '{print $2}')
+      #echo $nstart > /tmp/nstart.txt
+      sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk '{{ disk_dev.stdout }}'
+       d # delete mode
+       {{ part_num.stdout }} # partition number to delete
+       n # create new partition
+       {{ part_num.stdout }} # partition number to create
+       $nstart # first sector
+         # Last sector: default (empty) end of disk
+       N # Remove LVM2_member signature? Y/N
+       t # Change Type of Partition
+       {{ part_num.stdout }} # Partition Number to change type of
+       30 # Partition type to set: 30 Linux LVM on SLES 15.4
+       w # write the partition table to disk
+      EOF
+    when: ansible_distribution == "SLES" and ansible_distribution_version == "15.4"
+    register: partition_resize
 
-- name: "Resize Root Partition - Delete old root partition and recreate up to max free size in Partition Table for RHEL"
-  become: yes
-  shell: |
-    nstart=$(fdisk -l {{ disk_dev.stdout }} | grep -o '^{{ part_dev.stdout }}.*' | awk '{print $2}')
-    #echo $nstart > /tmp/nstart.txt
-    sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk '{{ disk_dev.stdout }}'
-     d # delete mode
-     {{ part_num.stdout }} # partition number to delete
-     n # create new partition
-     p # Partition type: p primary e extended
-     {{ part_num.stdout }} # partition number to create
-     $nstart # first sector
-       # Last sector: default (empty) end of disk
-     t # Change Type of Partition
-     {{ part_num.stdout }} # Partition Number to change type of
-     8e # Partition type to set (HEX code): 8e Linux LVM
-     w # write the partition table to disk
-    EOF
-  when: ansible_distribution == "RedHat"
-  ignore_errors: yes
-  register: partition_resize
+  - name: "Resize Root Partition - Delete old root partition and recreate up to max free size in Partition Table for RHEL"
+    become: yes
+    shell: |
+      nstart=$(fdisk -l {{ disk_dev.stdout }} | grep -o '^{{ part_dev.stdout }}.*' | awk '{print $2}')
+      #echo $nstart > /tmp/nstart.txt
+      sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk '{{ disk_dev.stdout }}'
+       d # delete mode
+       {{ part_num.stdout }} # partition number to delete
+       n # create new partition
+       p # Partition type: p primary e extended
+       {{ part_num.stdout }} # partition number to create
+       $nstart # first sector
+         # Last sector: default (empty) end of disk
+       t # Change Type of Partition
+       {{ part_num.stdout }} # Partition Number to change type of
+       8e # Partition type to set (HEX code): 8e Linux LVM
+       w # write the partition table to disk
+      EOF
+    when: ansible_distribution == "RedHat"
+    ignore_errors: yes
+    register: partition_resize
 
-- name: "Resize Root Partition - Reboot to apply new partition table"
-  reboot:
-  become: yes
-  when: ansible_distribution == "RedHat" or (ansible_distribution == "SLES" and ansible_distribution_major_version == "15")
+  - name: "Resize Root Partition - Delete old root partition and recreate up to max free size in Partition Table for RHEL"
+    become: yes
+    shell: |
+      nstart=$(fdisk -l {{ disk_dev.stdout }} | grep -o '^{{ part_dev.stdout }}.*' | awk '{print $2}')
+      #echo $nstart > /tmp/nstart.txt
+      sed -e 's/\s*\([\+0-9a-zA-Z]*\).*/\1/' << EOF | fdisk '{{ disk_dev.stdout }}'
+       d # delete mode
+       {{ part_num.stdout }} # partition number to delete
+       n # create new partition
+       p # Partition type: p primary e extended
+       {{ part_num.stdout }} # partition number to create
+       $nstart # first sector
+         # Last sector: default (empty) end of disk
+       t # Change Type of Partition
+       {{ part_num.stdout }} # Partition Number to change type of
+       8e # Partition type to set (HEX code): 8e Linux LVM
+       w # write the partition table to disk
+      EOF
+    when: ansible_os_family == 'Debian'
+    ignore_errors: yes
+    register: partition_resize
 
-- name: "Resize Root Partition - Resize Root partition device PVS to new partition size"
-  shell: pvresize '{{ part_dev.stdout }}'
-  become: yes
-  when: ansible_distribution == "RedHat" or (ansible_distribution == "SLES" and ansible_distribution_major_version == "15")
+  - name: "Resize Root Partition - Reboot to apply new partition table"
+    reboot:
+    become: yes
+    when: ansible_distribution == "RedHat" or (ansible_distribution == "SLES" and ansible_distribution_major_version == "15")
 
-- name: "Resize Root Partition - Detect LV Path name of the root partition LV, then extend the LV as well as the file system"
-  shell: |
-    rootlv_fs=$(lvdisplay {{ fs_vg.stdout }}/{{ fs_lv.stdout }} | grep -i "LV Path" | awk '{print $3}')
-    lvextend --resizefs -l +100%FREE $rootlv_fs
-  become: yes
-  register: lv_path
-  when: resizelv_active is defined and (resizelv_active == "true" or resizelv_active == true)
+  - name: "Resize Root Partition - Resize Root partition device PVS to new partition size"
+    shell: pvresize '{{ part_dev.stdout }}'
+    become: yes
+    when: ansible_distribution == "RedHat" or (ansible_distribution == "SLES" and ansible_distribution_major_version == "15")
 
-- debug: msg="Output= {{ lv_path.stdout_lines }}"
-  when: lv_path.stdout_line is defined
+  - name: "Resize Root Partition - Detect LV Path name of the root partition LV, then extend the LV as well as the file system"
+    shell: |
+      rootlv_fs=$(lvdisplay {{ fs_vg.stdout }}/{{ fs_lv.stdout }} | grep -i "LV Path" | awk '{print $3}')
+      lvextend --resizefs -l +100%FREE $rootlv_fs
+    become: yes
+    register: lv_path
+    when: resizelv_active is defined and (resizelv_active == "true" or resizelv_active == true)
+
+  - debug: msg="Output= {{ lv_path.stdout_lines }}"
+    when: lv_path.stdout_line is defined
